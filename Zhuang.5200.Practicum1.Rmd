@@ -5,6 +5,7 @@ emial: "zhuang.zha@northeastern.edu"
 output: html_notebook
 ---
 
+# Problem1
 ![](/Users/zhaoyizhuang/5200/Zhuang.Practicum1/5200Practicum1.jpg)
 
 ```{r echo=FALSE}
@@ -28,11 +29,16 @@ dbcon <-  dbConnect(MySQL(), user = db_user, password = db_password,
 # read csv file from the local
 ```{r echo=FALSE}
 library(tidyverse)
+library(sqldf)
 csv_file <- "/Users/zhaoyizhuang/5200/Zhuang.Practicum1/BirdStrikesData.csv"
 tableall <- read_csv(csv_file)
 tableall
 
 ```
+
+
+
+# Problem 2
 
 ```{sql connection=dbcon}
 DROP TABLE IF EXISTS airport, precipitation, birdinfo, aircraft, incident, tableall
@@ -114,6 +120,12 @@ CREATE TABLE incident(
 )
 ```
 
+
+
+
+
+# Problem 3
+
 # rename the column with "?" in the name to avoid error in the future.
 ```{r}
 tableall <- rename(tableall,  enginenum = 'Aircraft: Number of engines?', birdcollect = "Remains of wildlife collected?", iswarned = "Pilot warned of birds or wildlife?", cost = "Cost: Total $", islarge = "Is Aircraft Large?", airline = "Aircraft: Airline/Operator")
@@ -121,9 +133,11 @@ tableall <- rename(tableall,  enginenum = 'Aircraft: Number of engines?', birdco
 
 # change the logistic col to int type with 1 for true and 0 for false.
 # since there is no boolean type in mysql.
+# change the flightdate from type string to type date.
 ```{r}
 tableall$birdcollect <- as.integer(as.logical(tableall$birdcollect))
 tableall$`Remains of wildlife sent to Smithsonian` <- as.integer(as.logical(tableall$`Remains of wildlife sent to Smithsonian`))
+tableall$FlightDate <- as.Date(tableall$FlightDate, format = "%m/%d/%Y")
 ```
 
 # write table to the database
@@ -241,15 +255,80 @@ on t1.`Record ID` = pb.rid
 select * from incident
 ```
 
-```{r echo=FALSE}
-tableall
+```{sql connection=dbcon}
+select * from tableall
+where `Record ID` = 3019
 ```
 
+
+
+# problem 4
+
 ```{sql connection=dbcon}
-SELECT `Conditions: Precipitation`from tableall
-where `Aircraft: Type` IS NOT NULL
-group by `Conditions: Precipitation`
+SELECT count(airline) as count, airline from incident
+where flightphase LIKE "%take-off%" or flightphase LIKE "Climb"
+group by airline
 ```
+
+
+
+# problem 5
+
+```{sql connection=dbcon}
+SELECT count(airport) count, airport from incident
+group by airport
+order by count DESC
+```
+
+
+# problem 6
+
+```{sql connection=dbcon}
+SELECT count(datetoday) as strikePerYear, Year(datetoday) from incident
+group by Year(datetoday)
+```
+
+
+
+
+# problem 7
+
+# get the table of  the number of bird strikes incidents per year from 2008 to 2011 during take-off/climbing.
+```{r}
+tc <- dbGetQuery(dbcon, "SELECT count(datetoday) as strikePerYear, Year(datetoday) from incident
+where (flightphase LIKE \"%take-off%\" or flightphase LIKE \"Climb\") and Year(datetoday) >= 2008 and Year(datetoday) <= 2011
+group by Year(datetoday)
+order by Year(datetoday)")
+tc
+```
+
+# get the table of  the number of bird strikes incidents per year from 2008 to 2011 during descent/approach/landing
+```{r}
+dal <- dbGetQuery(dbcon, "SELECT count(datetoday) as strikePerYear, Year(datetoday) from incident
+where (flightphase LIKE \"%Landing%\" or flightphase LIKE \"Descent\" or flightphase LIKE \"Approach\") and Year(datetoday) >= 2008 and Year(datetoday) <= 2011
+group by Year(datetoday)
+order by Year(datetoday)")
+dal
+```
+
+# combine two tables to create a plot.
+```{r}
+tc['thetype'] = 'take-off/climbing'
+dal['thetype'] = 'descent/approach/landing'
+
+dat <- rbind(tc, dal)
+
+p <- ggplot(data = dat, aes(x = dat$`Year(datetoday)`, y = dat$strikePerYear, 
+                       group = dat$thetype, fill = dat$thetype))+
+  geom_bar(position = position_dodge(), width = 0.5, stat = "identity") +
+  labs(title = "Striking during different phase",
+         x = "Year",
+         y = "Striking Numbers")
+
+p <- p + guides(fill=guide_legend(title="Phase"))
+p
+```
+
 
 ```{r echo=FALSE}
 dbDisconnect(dbcon)
