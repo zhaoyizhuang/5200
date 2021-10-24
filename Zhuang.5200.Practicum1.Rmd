@@ -72,6 +72,7 @@ CREATE TABLE airport(
 ```
 
 # precipitation table represents the precipitation condition, it contains four boolean to check the precipitation condition. when it is none, it cannot be anything else. 
+# set constraint to precipitation. when the precipitation is none, it cannot be any of snow, fog or rain.
 ```{sql connection=dbcon}
 CREATE TABLE precipitation(
   precipitationid Integer NOT NULL AUTO_INCREMENT,
@@ -79,6 +80,7 @@ CREATE TABLE precipitation(
   fog BOOL NOT NULL,
   rain BOOL NOT NULL,
   none BOOL NOT NULL,
+  check (none=0 or (none=1 and (snow=0 or fog=0 or rain=0))),
   PRIMARY KEY (precipitationid)
 );
 ```
@@ -117,6 +119,13 @@ CREATE TABLE incident(
 tableall <- rename(tableall,  enginenum = 'Aircraft: Number of engines?', birdcollect = "Remains of wildlife collected?", iswarned = "Pilot warned of birds or wildlife?", cost = "Cost: Total $", islarge = "Is Aircraft Large?", airline = "Aircraft: Airline/Operator")
 ```
 
+# change the logistic col to int type with 1 for true and 0 for false.
+# since there is no boolean type in mysql.
+```{r}
+tableall$birdcollect <- as.integer(as.logical(tableall$birdcollect))
+tableall$`Remains of wildlife sent to Smithsonian` <- as.integer(as.logical(tableall$`Remains of wildlife sent to Smithsonian`))
+```
+
 # write table to the database
 ```{r}
 dbWriteTable(conn = dbcon, 
@@ -131,10 +140,6 @@ dbWriteTable(conn = dbcon,
 # omit rows that do no have aircraft information
 ```{sql connection=dbcon}
 delete from tableall where `Aircraft: Type` IS NULL OR `Aircraft: Type` = ''
-```
-
-```{sql connection=dbcon}
-select * from tableall
 ```
 
 # insert data from original table to the aircraft table.
@@ -193,6 +198,7 @@ select * from precipitation
 ```
 
 # insert data from original table to the incident table.
+# insert the foreign key from airport, model, precipitation birdinfo tables.
 ```{sql connection=dbcon}
 INSERT INTO incident (recordid, remark , datetoday , cost , peopleinjured , damage , impact ,
   altitude , aboveground , flightphase, iswarned , sky , enginenum , airline,
