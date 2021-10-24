@@ -1,0 +1,222 @@
+---
+title: "CS5200 Practicum1"
+author: "Zhaoyi Zhuang"
+emial: "zhuang.zha@northeastern.edu"
+output: html_notebook
+---
+
+![](/Users/zhaoyizhuang/5200/Zhuang.Practicum1/5200Practicum1.jpg)
+
+```{r echo=FALSE}
+# 1. Library
+require(RMySQL)
+```
+
+```{r echo=FALSE}
+# 2. Settings
+db_user <- 'cs5200'
+db_password <- 'khou2021'
+db_name <- 'SandboxDB'
+db_host <- 'cs5200-dbs.c9ozktmjtiec.us-east-2.rds.amazonaws.com' # AWS Host
+db_port <- 3306
+
+# 3. Read data from db
+dbcon <-  dbConnect(MySQL(), user = db_user, password = db_password,
+                 dbname = db_name, host = db_host, port = db_port)
+```
+
+# read csv file from the local
+```{r echo=FALSE}
+library(tidyverse)
+csv_file <- "/Users/zhaoyizhuang/5200/Zhuang.Practicum1/BirdStrikesData.csv"
+tableall <- read_csv(csv_file)
+tableall
+
+```
+
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS airport, precipitation, birdinfo, aircraft, incident, tableall
+```
+
+# aircraft table represents each aircraft. Thic table contains aircraft type, model, and description of if it is a large aircraft.
+```{sql connection=dbcon}
+CREATE TABLE aircraft(
+  model VARCHAR(250) NOT NULL,
+  planetype VARCHAR(250) NOT NULL,
+  islarge VARCHAR(250) NOT NULL,
+  PRIMARY KEY (model)
+)
+```
+
+# birdinfo table represents the bird information during the incident, bird's species and bird size, bird number, bird actual number, is bird collected and sent.
+```{sql connection=dbcon}
+CREATE TABLE birdinfo(
+  birdinfoid Integer NOT NULL AUTO_INCREMENT,
+  species VARCHAR(250),
+  birdsize VARCHAR(250),
+  birdnum VARCHAR(250),
+  birdnumactual DOUBLE,
+  isbirdcollected BOOL,
+  isbirdsent VARCHAR(250),
+  PRIMARY KEY (birdinfoid)
+)
+```
+
+# airport table represents an airport. it contains airportid, state.
+```{sql connection=dbcon}
+CREATE TABLE airport(
+  airport VARCHAR(250) NOT NULL,
+  originstate VARCHAR(250),
+  PRIMARY KEY (airport)
+)
+```
+
+# precipitation table represents the precipitation condition, it contains four boolean to check the precipitation condition. when it is none, it cannot be anything else. 
+```{sql connection=dbcon}
+CREATE TABLE precipitation(
+  precipitationid Integer NOT NULL AUTO_INCREMENT,
+  snow BOOL NOT NULL,
+  fog BOOL NOT NULL,
+  rain BOOL NOT NULL,
+  none BOOL NOT NULL,
+  PRIMARY KEY (precipitationid)
+);
+```
+
+# incident table represents an incident. it contains record id, remarks,  date, cost, people injured, damage level, altitude, flight phase, if pilot is warned, percipitation, sky condition, birdid and airctaftid.
+```{sql connection=dbcon}
+CREATE TABLE incident(
+  recordid Integer NOT NULL,
+  remark VARCHAR(1500),
+  datetoday DATE,
+  cost DOUBLE,
+  peopleinjured DOUBLE,
+  damage VARCHAR(250),
+  impact VARCHAR(250),
+  altitude VARCHAR(250),
+  aboveground DOUBLE,
+  flightphase VARCHAR(250),
+  iswarned BOOLEAN,
+  precipitationid Integer NOT NULL,
+  sky VARCHAR(250),
+  enginenum DOUBLE,
+  airline VARCHAR(250),
+  airport VARCHAR(250) NOT NULL,
+  birdinfoid Integer NOT NULL,
+  model VARCHAR(250) NOT NULL,
+  PRIMARY KEY (recordid),
+  FOREIGN KEY (birdinfoid) REFERENCES birdinfo(birdinfoid),
+  FOREIGN KEY (model) REFERENCES aircraft(model),
+  FOREIGN KEY (precipitationid) REFERENCES precipitation(precipitationid),
+  FOREIGN KEY (airport) REFERENCES airport(airport)
+)
+```
+
+# rename the column with "?" in the name to avoid error in the future.
+```{r}
+tableall <- rename(tableall,  enginenum = 'Aircraft: Number of engines?', birdcollect = "Remains of wildlife collected?", iswarned = "Pilot warned of birds or wildlife?", cost = "Cost: Total $", islarge = "Is Aircraft Large?")
+```
+
+# write table to the database
+```{r}
+dbWriteTable(conn = dbcon, 
+             name = "tableall", 
+             value = tableall)
+```
+
+```{r}
+#options(max.print=30000)
+```
+
+# omit rows that do no have aircraft information
+```{sql connection=dbcon}
+delete from tableall where `Aircraft: Type` IS NULL OR `Aircraft: Type` = ''
+```
+
+```{sql connection=dbcon}
+select * from tableall
+```
+
+# insert data from original table to the aircraft table.
+# Using all attribute group by reduce the row number and the same time keep the information complete.
+```{sql connection=dbcon}
+INSERT INTO aircraft (model,planetype,islarge)
+SELECT `Aircraft: Make/Model`, `Aircraft: Type`, islarge from tableall
+where `Aircraft: Type` IS NOT NULL
+group by `Aircraft: Make/Model`, `Aircraft: Type`, islarge
+```
+
+```{sql connection=dbcon}
+select * from aircraft
+```
+
+
+# birdinfo table represents the bird's info during the incident.
+# Using distinct to reduce the row number and retain all data.
+```{sql connection=dbcon}
+INSERT INTO birdinfo (species, birdsize, birdnum, birdnumactual,isbirdcollected,isbirdsent)
+SELECT DISTINCT `Wildlife: Species`, `Wildlife: Size`, `Wildlife: Number struck`, `Wildlife: Number Struck Actual`, birdcollect, `Remains of wildlife sent to Smithsonian` from tableall
+```
+
+```{sql connection=dbcon}
+select * from birdinfo
+```
+
+# insert data from original table to the airport table.
+# Using all attribute group by to reduce the row number and the same time keep the information complete.
+```{sql connection=dbcon}
+INSERT INTO airport (airport,originstate)
+SELECT `Airport: Name`, `Origin State` from tableall
+where `Aircraft: Type` IS NOT NULL
+group by `Airport: Name`, `Origin State`
+```
+
+```{sql connection=dbcon}
+select * from airport
+```
+
+# insert data from original table to the precipitation table.
+# Using distinct to reduce the row number and the same time keep the information complete.
+# precipitation table has four attributes, snow, rain, fog and none. they are all booleans. So when there is snow and fog, the row will be 1, 1, 0, 0. where first two represents true for snow and fog.
+```{sql connection=dbcon}
+INSERT INTO precipitation (snow, fog, rain, none)
+SELECT DISTINCT
+    (CASE WHEN `Conditions: Precipitation` like "%snow%" THEN 1 ELSE 0 END) as snow,
+    (CASE WHEN `Conditions: Precipitation` like "%fog%" THEN 1 ELSE 0 END) as fog,
+    (CASE WHEN `Conditions: Precipitation` like "%rain%" THEN 1 ELSE 0 END) as rain,
+    (CASE WHEN `Conditions: Precipitation` like "%none%" THEN 1 ELSE 0 END) as none
+FROM tableall
+```
+
+```{sql connection=dbcon}
+select * from precipitation
+```
+
+# insert data from original table to the incident table.
+```{sql connection=dbcon}
+INSERT INTO incident (recordid, remark , datetoday , cost , peopleinjured , damage , impact ,
+  altitude , aboveground , flightphase, iswarned , precipitationid , sky , enginenum , airline,
+  airport , birdinfoid, model)
+SELECT `Record ID`, Remarks, FlightDate, cost, `Number of people injured`, `Effect: Indicated Damage`, `Effect: Impact to flight`, `Altitude bin`, `Feet above ground`, `When: Phase of flight`, iswarned, precipitationid, 
+`Conditions: Sk`y, enginenum,` Aircraft: Airline/Operator`, airport , 
+birdinfoid, 
+model
+```
+
+```{sql connection=dbcon}
+select * from precipitation
+```
+
+```{r echo=FALSE}
+tableall
+```
+
+```{sql connection=dbcon}
+SELECT `Conditions: Precipitation`from tableall
+where `Aircraft: Type` IS NOT NULL
+group by `Conditions: Precipitation`
+```
+
+```{r echo=FALSE}
+#dbDisconnect(dbcon)
+```
