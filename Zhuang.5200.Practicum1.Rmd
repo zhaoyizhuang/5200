@@ -86,7 +86,7 @@ CREATE TABLE precipitation(
 # incident table represents an incident. it contains record id, remarks,  date, cost, people injured, damage level, altitude, flight phase, if pilot is warned, percipitation, sky condition, birdid and airctaftid.
 ```{sql connection=dbcon}
 CREATE TABLE incident(
-  recordid Integer NOT NULL,
+  recordid DOUBLE NOT NULL,
   remark VARCHAR(1500),
   datetoday DATE,
   cost DOUBLE,
@@ -97,13 +97,13 @@ CREATE TABLE incident(
   aboveground DOUBLE,
   flightphase VARCHAR(250),
   iswarned BOOLEAN,
-  precipitationid Integer NOT NULL,
   sky VARCHAR(250),
   enginenum DOUBLE,
   airline VARCHAR(250),
   airport VARCHAR(250) NOT NULL,
-  birdinfoid Integer NOT NULL,
   model VARCHAR(250) NOT NULL,
+  precipitationid Integer NOT NULL,
+  birdinfoid Integer NOT NULL,
   PRIMARY KEY (recordid),
   FOREIGN KEY (birdinfoid) REFERENCES birdinfo(birdinfoid),
   FOREIGN KEY (model) REFERENCES aircraft(model),
@@ -114,7 +114,7 @@ CREATE TABLE incident(
 
 # rename the column with "?" in the name to avoid error in the future.
 ```{r}
-tableall <- rename(tableall,  enginenum = 'Aircraft: Number of engines?', birdcollect = "Remains of wildlife collected?", iswarned = "Pilot warned of birds or wildlife?", cost = "Cost: Total $", islarge = "Is Aircraft Large?")
+tableall <- rename(tableall,  enginenum = 'Aircraft: Number of engines?', birdcollect = "Remains of wildlife collected?", iswarned = "Pilot warned of birds or wildlife?", cost = "Cost: Total $", islarge = "Is Aircraft Large?", airline = "Aircraft: Airline/Operator")
 ```
 
 # write table to the database
@@ -195,16 +195,44 @@ select * from precipitation
 # insert data from original table to the incident table.
 ```{sql connection=dbcon}
 INSERT INTO incident (recordid, remark , datetoday , cost , peopleinjured , damage , impact ,
-  altitude , aboveground , flightphase, iswarned , precipitationid , sky , enginenum , airline,
-  airport , birdinfoid, model)
-SELECT `Record ID`, Remarks, FlightDate, cost, `Number of people injured`, `Effect: Indicated Damage`, `Effect: Impact to flight`, `Altitude bin`, `Feet above ground`, `When: Phase of flight`, iswarned, precipitationid, 
-`Conditions: Sk`y, enginenum,` Aircraft: Airline/Operator`, airport , 
-birdinfoid, 
-model
+  altitude , aboveground , flightphase, iswarned , sky , enginenum , airline,
+  airport,  model, precipitationid ,  birdinfoid)
+
+SELECT `Record ID`, Remarks, FlightDate, cost, `Number of people injured`, `Effect: Indicated Damage`, `Effect: Impact to flight`, `Altitude bin`, `Feet above ground`, `When: Phase of flight`, iswarned, `Conditions: Sky`, enginenum, airline, `Airport: Name`, `Aircraft: Make/Model`, precipitationid, birdinfoid
+
+from
+  
+(SELECT `Record ID`, Remarks, FlightDate, cost, `Number of people injured`, `Effect: Indicated Damage`, `Effect: Impact to flight`, `Altitude bin`, `Feet above ground`, `When: Phase of flight`, iswarned, `Conditions: Sky`, enginenum, airline, `Airport: Name`, `Aircraft: Make/Model` from tableall) as t1
+
+join
+
+(SELECT precipitationid, p1.rid as rid, birdinfoid from
+
+(SELECT p.precipitationid, rid from precipitation as p join
+(SELECT 
+    `Record ID` as rid,
+    (CASE WHEN `Conditions: Precipitation` like "%snow%" THEN 1 ELSE 0 END) as snow,
+    (CASE WHEN `Conditions: Precipitation` like "%fog%" THEN 1 ELSE 0 END) as fog,
+    (CASE WHEN `Conditions: Precipitation` like "%rain%" THEN 1 ELSE 0 END) as rain,
+    (CASE WHEN `Conditions: Precipitation` like "%none%" THEN 1 ELSE 0 END) as none
+FROM  tableall) as e 
+on p.snow = e.snow and p.fog = e.fog and p.rain = e.rain and p.none = e.none) as p1
+
+join
+
+(SELECT birdinfoid, rid from birdinfo join
+(SELECT `Wildlife: Species` as a, `Wildlife: Size` as b, `Wildlife: Number struck` as c, `Wildlife: Number Struck Actual` as d, birdcollect as q, `Remains of wildlife sent to Smithsonian` as o, `Record ID` as rid FROM  tableall) as sub4
+on species = a and birdsize = b and birdnum = c and birdnumactual = d and isbirdcollected = q and isbirdsent = o) as b1
+
+on p1.rid = b1.rid) as pb
+
+on t1.`Record ID` = pb.rid
+
+
 ```
 
 ```{sql connection=dbcon}
-select * from precipitation
+select * from incident
 ```
 
 ```{r echo=FALSE}
@@ -218,5 +246,5 @@ group by `Conditions: Precipitation`
 ```
 
 ```{r echo=FALSE}
-#dbDisconnect(dbcon)
+dbDisconnect(dbcon)
 ```
