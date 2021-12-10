@@ -1,0 +1,287 @@
+---
+title: "CS5200 Practicum2"
+author: "Zhaoyi Zhuang"
+output: html_notebook
+---
+
+# Part 1
+## Part1 Question1 
+![](/Users/zhaoyizhuang/5200/Practicum2/P2Q1ERD.png)
+
+## Create the database
+```{r}
+library(RSQLite)
+
+fpath = "/Users/zhaoyizhuang/5200/Practicum2/"
+dbfile = "p2DB.sqlite"
+
+# if database file already exists, we connect to it, otherwise
+# we create a new database
+dbcon <- dbConnect(RSQLite::SQLite(), paste0(fpath,dbfile))
+```
+
+## Part1 Question2 Relational Schema
+```{sql connection=dbcon}
+PRAGMA foreign_keys = ON
+```
+
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS Journal
+```
+
+```{sql connection=dbcon}
+CREATE TABLE Journal(
+  ISSN TEXT NOT NULL,
+  Title TEXT NOT NULL,
+  PRIMARY KEY (ISSN)
+)
+```
+
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS Author
+```
+
+```{sql connection=dbcon}
+CREATE TABLE Author(
+  AuthorId TEXT NOT NULL,
+  LastName TEXT NOT NULL,
+  FirstName TEXT NOT NULL,
+  Initials TEXT NOT NULL,
+  PRIMARY KEY (AuthorId)
+)
+```
+
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS History
+```
+
+
+```{sql connection=dbcon}
+CREATE TABLE History(
+  HistoryId TEXT NOT NULL,
+  entrez TEXT NOT NULL,
+  pubmed TEXT NOT NULL,
+  medline TEXT NOT NULL,
+  PRIMARY KEY (HistoryId)
+)
+```
+
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS Article
+```
+
+```{sql connection=dbcon}
+CREATE TABLE Article(
+  PMID TEXT NOT NULL,
+  ISSN TEXT NOT NULL,
+  Volume TEXT NOT NULL,
+  Issue TEXT NOT NULL,
+  ArticleTitle TEXT NOT NULL,
+  HistoryId TEXT NOT NULL,
+  PRIMARY KEY (PMID),
+  FOREIGN KEY (ISSN) REFERENCES Journal(ISSN),
+  FOREIGN KEY (HistoryId) REFERENCES History(HistoryId)
+)
+```
+
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS Write
+```
+
+```{sql connection=dbcon}
+CREATE TABLE Write(
+  PMID TEXT NOT NULL,
+  AuthorId TEXT NOT NULL,
+  PRIMARY KEY (PMID, AuthorId),
+  FOREIGN KEY (AuthorId) REFERENCES Author(AuthorId), 
+  FOREIGN KEY (PMID) REFERENCES Article(PMID)
+)
+```
+
+## Part1 Question3
+## Load the XML file
+```{r}
+library("XML")
+library("methods")
+
+path <- "/Users/zhaoyizhuang/5200/Practicum2/"
+xmlFile <- "pubmed_sample.xml"
+fp <- paste0(path,xmlFile)
+
+xmlObj <- xmlParse(fp)
+root <- xmlRoot(xmlObj)
+size <- xmlSize(root)
+```
+## self-defined function helping read the xml
+```{r}
+readFromXml <- function(xpathEx) {
+  result <- xpathSApply(xmlObj, xpathEx, xmlValue)
+}
+
+```
+
+## Create the Journal table
+```{r}
+ISSN <- readFromXml("//Article/Journal/ISSN")
+Title <- readFromXml("//Article/Journal/Title")
+
+Journal <- cbind(ISSN, Title)
+Journal <- Journal[!duplicated(Journal), ]
+#Journal
+```
+
+
+## Create the Article table
+```{r}
+PMID <- readFromXml("//MedlineCitation/PMID")
+ArticleTitle <- readFromXml("//ArticleTitle")
+Volume <- readFromXml("//Article/Journal/JournalIssue/Volume")
+Issue <- readFromXml("//Article/Journal/JournalIssue/Issue")
+
+Article <- cbind(PMID, ISSN, Volume, Issue, ArticleTitle)
+#Article
+```
+
+
+## Create Author table
+```{r}
+LastName <- readFromXml("//Article/AuthorList/Author/LastName")
+FirstName <- readFromXml("//AuthorList/Author/ForeName")
+Initials <- readFromXml("//Article/AuthorList/Author/Initials")
+
+Author <- cbind(LastName, FirstName, Initials)
+Author <- Author[!duplicated(Author), ]
+
+AuthorId = 1:nrow(Author)
+
+Author <- cbind(Author, AuthorId)
+#Author
+```
+
+## Create Write table, it is a look up table represents the relationship between author and article.
+```{r}
+Write <- data.frame()
+
+for (id in Article[,1]) {
+  LastName <- readFromXml(
+    paste("//MedlineCitation[PMID = '", id, "']/Article/AuthorList/Author/LastName", sep = ""))
+  FirstName <- readFromXml(
+    paste("//MedlineCitation[PMID = '", id, "']/Article/AuthorList/Author/ForeName", sep = ""))
+  Initials <- readFromXml(
+    paste("//MedlineCitation[PMID = '", id, "']/Article/AuthorList/Author/Initials", sep = ""))
+  
+  for(i in 1:length(LastName)) {
+    for(e in 1 : nrow(Author)) {
+      if (LastName[i] == Author[, 1][e] & FirstName[i] == Author[, 2][e] & Initials[i] == Author[, 3][e]) {
+        df <- cbind(Author[,4][e], id)
+        Write <- rbind(Write, df)
+        break;
+      }
+    }
+  }
+  
+}
+
+names(Write) <- c("AuthorId", "PMID")
+#Write
+```
+
+## Create the History table
+```{r}
+entrez <- vector()
+pubmed <- vector()
+medline <- vector()
+
+for (i in 1:size) {
+  curr <- root[[i]][[2]][[1]]
+  for (e in 1:xmlSize(curr)) {
+    a <- xmlAttrs(curr[[e]])[[1]]
+    if (a == "entrez") {
+      entrez <- append(entrez, (paste(xmlValue(curr[[e]][[1]]), xmlValue(curr[[e]][[2]]), xmlValue(curr[[e]][[3]]), sep = "/")))
+    } 
+    if (a == "pubmed") {
+      pubmed <- append(pubmed, (paste(xmlValue(curr[[e]][[1]]), xmlValue(curr[[e]][[2]]), xmlValue(curr[[e]][[3]]), sep = "/")))
+    }
+    if (a == "medline") {
+      medline <- append(medline, (paste(xmlValue(curr[[e]][[1]]), xmlValue(curr[[e]][[2]]), xmlValue(curr[[e]][[3]]), sep = "/")))
+    }
+  }
+}
+
+History <- cbind(entrez, pubmed, medline)
+History <- History[!duplicated(History), ]
+
+HistoryId = 1:nrow(History)
+
+History <- cbind(History, HistoryId)
+#History
+```
+
+## add History ID to the Article table
+```{r}
+Article <- cbind(Article, HistoryId)
+```
+
+
+## write table to the database
+```{r}
+dbWriteTable(conn = dbcon, 
+             name = "Journal", 
+             value = data.frame(Journal),
+             overwrite = T)
+
+dbWriteTable(conn = dbcon, 
+             name = "Author", 
+             value = data.frame(Author),
+             overwrite = T)
+
+dbWriteTable(conn = dbcon, 
+             name = "History", 
+             value = data.frame(History),
+             overwrite = T)
+
+dbWriteTable(conn = dbcon, 
+             name = "Article", 
+             value = data.frame(Article),
+             overwrite = T)
+
+dbWriteTable(conn = dbcon, 
+             name = "Write", 
+             value = data.frame(Write),
+             overwrite = T)
+```
+
+## Show tables
+```{sql connection=dbcon}
+SELECT * FROM Journal
+```
+
+```{sql connection=dbcon}
+SELECT * FROM Author
+```
+
+```{sql connection=dbcon}
+SELECT * FROM History
+```
+
+```{sql connection=dbcon}
+SELECT * FROM Article
+```
+
+```{sql connection=dbcon}
+SELECT * FROM Write
+```
+
+# Part2
+## Part2 Question1
+
+
+
+
+## Part2 Question2
+
+
+
+```{r}
+dbDisconnect(dbcon)
+```
