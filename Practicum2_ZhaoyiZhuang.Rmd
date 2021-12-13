@@ -32,8 +32,11 @@ DROP TABLE IF EXISTS Journal
 ```{sql connection=dbcon}
 CREATE TABLE Journal(
   ISSN TEXT NOT NULL,
+  Volume TEXT NOT NULL,
+  Issue TEXT NOT NULL,
+  PubDate TEXT NOT NULL,
   Title TEXT NOT NULL,
-  PRIMARY KEY (ISSN)
+  PRIMARY KEY (ISSN, Volume, Issue)
 )
 ```
 
@@ -47,6 +50,7 @@ CREATE TABLE Author(
   LastName TEXT NOT NULL,
   FirstName TEXT NOT NULL,
   Initials TEXT NOT NULL,
+  Affiliation TEXT,
   PRIMARY KEY (AuthorId)
 )
 ```
@@ -54,7 +58,6 @@ CREATE TABLE Author(
 ```{sql connection=dbcon}
 DROP TABLE IF EXISTS History
 ```
-
 
 ```{sql connection=dbcon}
 CREATE TABLE History(
@@ -74,9 +77,8 @@ DROP TABLE IF EXISTS Article
 CREATE TABLE Article(
   PMID TEXT NOT NULL,
   ISSN TEXT NOT NULL,
-  Volume TEXT NOT NULL,
-  Issue TEXT NOT NULL,
   ArticleTitle TEXT NOT NULL,
+  DateCreated TEXT NOT NULL,
   HistoryId TEXT NOT NULL,
   PRIMARY KEY (PMID),
   FOREIGN KEY (ISSN) REFERENCES Journal(ISSN),
@@ -112,7 +114,7 @@ xmlObj <- xmlParse(fp)
 root <- xmlRoot(xmlObj)
 size <- xmlSize(root)
 ```
-## self-defined function helping read the xml
+## Self-defined function helping read the xml
 ```{r}
 readFromXml <- function(xpathEx) {
   result <- xpathSApply(xmlObj, xpathEx, xmlValue)
@@ -120,70 +122,137 @@ readFromXml <- function(xpathEx) {
 
 ```
 
-## Create the Journal table
+## Create the Journal table. 
 ```{r}
 ISSN <- readFromXml("//Article/Journal/ISSN")
+Volume <- readFromXml("//Article/Journal/JournalIssue/Volume")
+Issue <- readFromXml("//Article/Journal/JournalIssue/Issue")
 Title <- readFromXml("//Article/Journal/Title")
+PubDate <- vector()
 
-Journal <- cbind(ISSN, Title)
+for (i in 1:size) {
+  for (e in 1:xmlSize(root[[i]][[1]])) {
+    if (xmlName(root[[i]][[1]][[e]]) == "Article") {
+      curr <- root[[i]][[1]][[e]][[1]][[2]][[3]][[1]]
+      year <- substr(xmlValue(curr), 1, 4) # Only keep the year
+      PubDate <- append(PubDate, year)
+    }
+  }
+}
+
+Journal <- cbind(ISSN, Volume, Issue, PubDate, Title)
 Journal <- Journal[!duplicated(Journal), ]
-#Journal
+Journal <- data.frame(Journal)
+#Journal$PubDate <- as.Date(Journal$PubDate, format = "%Y")
+Journal
 ```
 
 
 ## Create the Article table
 ```{r}
+ISSN <- readFromXml("//Article/Journal/ISSN")
 PMID <- readFromXml("//MedlineCitation/PMID")
 ArticleTitle <- readFromXml("//ArticleTitle")
-Volume <- readFromXml("//Article/Journal/JournalIssue/Volume")
-Issue <- readFromXml("//Article/Journal/JournalIssue/Issue")
+DateCreated <- vector()
 
-Article <- cbind(PMID, ISSN, Volume, Issue, ArticleTitle)
-#Article
+for (i in 1:size) {
+  curr <- root[[i]][[1]][[2]]
+  date <- paste(xmlValue(curr[[2]]), xmlValue(curr[[3]]), xmlValue(curr[[1]]), sep = "/")
+  DateCreated <- append(DateCreated, date)
+}
+
+Article <- cbind(PMID, ISSN, ArticleTitle, DateCreated)
+Article <- data.frame(Article)
+Article$DateCreated <- as.Date(Article$DateCreated, format = "%m/%d/%Y")
+Article
 ```
 
 
 ## Create Author table
 ```{r}
-LastName <- readFromXml("//Article/AuthorList/Author/LastName")
-FirstName <- readFromXml("//AuthorList/Author/ForeName")
-Initials <- readFromXml("//Article/AuthorList/Author/Initials")
+Affiliation <- vector()
+LastName <- vector()
+FirstName <- vector()
+Initials <- vector()
 
-Author <- cbind(LastName, FirstName, Initials)
+for (i in 1:size) {
+  for (e in 1:xmlSize(root[[i]][[1]])) {
+    if (xmlName(root[[i]][[1]][[e]]) == "Article")
+      for (s in 1:xmlSize(root[[i]][[1]][[e]])) {
+        if (xmlName(root[[i]][[1]][[e]][[s]]) == "AuthorList") {
+          curr <- root[[i]][[1]][[e]][[s]]
+          for (f in 1:xmlSize(curr)) {
+            LastName <- append(LastName, xmlValue(curr[[f]][[1]]))
+            FirstName <- append(FirstName, xmlValue(curr[[f]][[2]]))
+            Initials <- append(Initials, xmlValue(curr[[f]][[3]]))
+            cc <- xmlValue(curr[[f]][[4]])
+            if (is.na(cc)) {
+              cc <- "None"
+            }
+            Affiliation <- append(Affiliation, cc)
+          }
+        }
+      }
+  }
+}
+
+Author <- cbind(LastName, FirstName, Initials, Affiliation)
 Author <- Author[!duplicated(Author), ]
 
 AuthorId = 1:nrow(Author)
 
 Author <- cbind(Author, AuthorId)
-#Author
+Author <- data.frame(Author)
+Author
 ```
 
 ## Create Write table, it is a look up table represents the relationship between author and article.
 ```{r}
-Write <- data.frame()
+AuthorList_Id <- vector()
+AuthorList_AuthorId <- vector()
+Author_count <- 1
+ff <- vector()
+gg <- vector()
 
-for (id in Article[,1]) {
-  LastName <- readFromXml(
-    paste("//MedlineCitation[PMID = '", id, "']/Article/AuthorList/Author/LastName", sep = ""))
-  FirstName <- readFromXml(
-    paste("//MedlineCitation[PMID = '", id, "']/Article/AuthorList/Author/ForeName", sep = ""))
-  Initials <- readFromXml(
-    paste("//MedlineCitation[PMID = '", id, "']/Article/AuthorList/Author/Initials", sep = ""))
-  
-  for(i in 1:length(LastName)) {
-    for(e in 1 : nrow(Author)) {
-      if (LastName[i] == Author[, 1][e] & FirstName[i] == Author[, 2][e] & Initials[i] == Author[, 3][e]) {
-        df <- cbind(Author[,4][e], id)
-        Write <- rbind(Write, df)
-        break;
+for (i in 1:size) {
+  pid <- xmlValue(root[[i]][[1]][[1]])
+  for (e in 1:xmlSize(root[[i]][[1]])) {
+    if (xmlName(root[[i]][[1]][[e]]) == "Article")
+      for (s in 1:xmlSize(root[[i]][[1]][[e]])) {
+        if (xmlName(root[[i]][[1]][[e]][[s]]) == "AuthorList") {
+          curr <- root[[i]][[1]][[e]][[s]]
+          for (f in 1:xmlSize(curr)) {
+            LastName <- xmlValue(curr[[f]][[1]])
+            FirstName <- xmlValue(curr[[f]][[2]])
+            Initials <- xmlValue(curr[[f]][[3]])
+            Affiliation <- xmlValue(curr[[f]][[4]])
+            if (is.na(Affiliation)) {
+              Affiliation <- "None"
+            }
+            
+            for(v in 1 : nrow(Author)) {
+              if (LastName == Author$LastName[v] & FirstName == Author$FirstName[v] 
+                  & Initials == Author$Initials[v] & Affiliation == Author$Affiliation[v]) {
+                
+                AuthorList_Id <- append(AuthorList_Id, Author_count)
+                AuthorList_AuthorId <- append(AuthorList_AuthorId, as.character(Author$AuthorId[v]))
+                ff <- append(ff, as.character(Author$AuthorId[v]))
+                gg <- append(gg, pid)
+                break;
+              }
+            }
+          }
+        }
       }
     }
-  }
-  
+  Author_count <- Author_count + 1
 }
 
+
+Write <- cbind(ff, gg)
+Write <- data.frame(Write)
 names(Write) <- c("AuthorId", "PMID")
-#Write
+Write
 ```
 
 ## Create the History table
@@ -191,6 +260,10 @@ names(Write) <- c("AuthorId", "PMID")
 entrez <- vector()
 pubmed <- vector()
 medline <- vector()
+
+Year <- vector()
+Month <- vector()
+Day <- vector()
 
 for (i in 1:size) {
   curr <- root[[i]][[2]][[1]]
@@ -201,6 +274,9 @@ for (i in 1:size) {
     } 
     if (a == "pubmed") {
       pubmed <- append(pubmed, (paste(xmlValue(curr[[e]][[1]]), xmlValue(curr[[e]][[2]]), xmlValue(curr[[e]][[3]]), sep = "/")))
+      Year <- append(Year, xmlValue(curr[[e]][[1]]))
+      Month <- append(Month, xmlValue(curr[[e]][[2]]))
+      Day <- append(Day, xmlValue(curr[[e]][[3]]))
     }
     if (a == "medline") {
       medline <- append(medline, (paste(xmlValue(curr[[e]][[1]]), xmlValue(curr[[e]][[2]]), xmlValue(curr[[e]][[3]]), sep = "/")))
@@ -214,40 +290,42 @@ History <- History[!duplicated(History), ]
 HistoryId = 1:nrow(History)
 
 History <- cbind(History, HistoryId)
-#History
+History <- data.frame(History)
+History
 ```
 
-## add History ID to the Article table
+## Add History ID to the Article table
 ```{r}
 Article <- cbind(Article, HistoryId)
+Article
 ```
 
 
-## write table to the database
+## Write table to the database
 ```{r}
 dbWriteTable(conn = dbcon, 
              name = "Journal", 
-             value = data.frame(Journal),
+             value = Journal,
              overwrite = T)
 
 dbWriteTable(conn = dbcon, 
              name = "Author", 
-             value = data.frame(Author),
+             value = Author,
              overwrite = T)
 
 dbWriteTable(conn = dbcon, 
              name = "History", 
-             value = data.frame(History),
+             value = History,
              overwrite = T)
 
 dbWriteTable(conn = dbcon, 
              name = "Article", 
-             value = data.frame(Article),
+             value = Article,
              overwrite = T)
 
 dbWriteTable(conn = dbcon, 
              name = "Write", 
-             value = data.frame(Write),
+             value = Write,
              overwrite = T)
 ```
 
@@ -274,11 +352,229 @@ SELECT * FROM Write
 
 # Part2
 ## Part2 Question1
+![](/Users/zhaoyizhuang/5200/Practicum2/P2Q1.png)
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS Journal_Dimension
+```
 
+```{sql connection=dbcon}
+CREATE TABLE Journal_Dimension(
+  ISSN TEXT NOT NULL,
+  Title TEXT NOT NULL,
+  PRIMARY KEY (ISSN)
+)
+```
 
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS Author_Dimension
+```
 
+```{sql connection=dbcon}
+CREATE TABLE Author_Dimension(
+  AuthorId TEXT NOT NULL,
+  LastName TEXT NOT NULL,
+  FirstName TEXT NOT NULL,
+  Initials TEXT NOT NULL,
+  PRIMARY KEY (AuthorId)
+)
+```
+
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS History_Dimension
+```
+
+```{sql connection=dbcon}
+CREATE TABLE History_Dimension(
+  HistoryId TEXT NOT NULL,
+  Year TEXT NOT NULL,
+  Month TEXT NOT NULL,
+  Day TEXT NOT NULL,
+  PRIMARY KEY (HistoryId)
+)
+```
+
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS AuthorList_Dimension
+```
+
+```{sql connection=dbcon}
+CREATE TABLE AuthorList_Dimension(
+  AuthorListId TEXT NOT NULL,
+  PRIMARY KEY (AuthorListId)
+)
+```
+
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS Article_Fact
+```
+
+```{sql connection=dbcon}
+CREATE TABLE Article_Fact(
+  PMID TEXT NOT NULL,
+  ISSN TEXT NOT NULL,
+  Volume TEXT NOT NULL,
+  Issue TEXT NOT NULL,
+  ArticleTitle TEXT NOT NULL,
+  HistoryId TEXT NOT NULL,
+  AuthorListId TEXT NOT NULL,
+  PRIMARY KEY (PMID),
+  FOREIGN KEY (ISSN) REFERENCES Journal_Dimension(ISSN),
+  FOREIGN KEY (AuthorListId) REFERENCES AuthorList_Dimension(AuthorListId),
+  FOREIGN KEY (HistoryId) REFERENCES History_Dimension(HistoryId)
+)
+```
+
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS AuthorList_Bridge
+```
+
+```{sql connection=dbcon}
+CREATE TABLE AuthorList_Bridge(
+  AuthorListId TEXT NOT NULL,
+  AuthorId TEXT NOT NULL,
+  PRIMARY KEY (AuthorListId, AuthorId),
+  FOREIGN KEY (AuthorId) REFERENCES Author(AuthorId), 
+  FOREIGN KEY (AuthorListId) REFERENCES AuthorList_Dimension(AuthorListId)
+)
+```
+
+## Create History Dimension table based on the the PubStatus pubmed. 
+## The Year Month and Day column are populated in the part 1 line 208
+```{r}
+History_Dimension <- cbind(Year, Month, Day, HistoryId)
+```
+
+## Populate the AuthorList_Dimension
+```{r}
+AuthorList_Dimension = 1:size
+```
+
+## Add AuthorListId to the Article_Fact
+```{r}
+Article_Fact <- cbind(Article, AuthorList_Dimension)
+```
+
+## Populate the AuthorList_Bridge
+```{r}
+AuthorList_Bridge <- cbind(AuthorList_Id, AuthorId)
+```
+
+## Overwrite tables to database
+```{r}
+dbWriteTable(conn = dbcon, 
+             name = "Journal_Dimension", 
+             value = data.frame(Journal),
+             overwrite = T)
+
+dbWriteTable(conn = dbcon, 
+             name = "Author_Dimension", 
+             value = data.frame(Author),
+             overwrite = T)
+
+dbWriteTable(conn = dbcon, 
+             name = "History_Dimension", 
+             value = data.frame(History_Dimension),
+             overwrite = T)
+
+dbWriteTable(conn = dbcon, 
+             name = "Article_Fact", 
+             value = data.frame(Article_Fact),
+             overwrite = T)
+
+dbWriteTable(conn = dbcon, 
+             name = "AuthorList_Bridge", 
+             value = data.frame(AuthorList_Bridge),
+             overwrite = T)
+
+dbWriteTable(conn = dbcon, 
+             name = "AuthorList_Dimension", 
+             value = data.frame(AuthorList_Dimension),
+             overwrite = T)
+```
+
+## Show tables
+```{sql connection=dbcon}
+SELECT * FROM History_Dimension
+```
+
+```{sql connection=dbcon}
+SELECT * FROM Journal_Dimension
+```
+
+```{sql connection=dbcon}
+SELECT * FROM AuthorList_Dimension
+```
+
+```{sql connection=dbcon}
+SELECT * FROM AuthorList_Bridge
+```
+
+```{sql connection=dbcon}
+SELECT * FROM Author_Dimension
+```
+
+```{sql connection=dbcon}
+SELECT * FROM Article_Fact
+```
 
 ## Part2 Question2
+![](/Users/zhaoyizhuang/5200/Practicum2/P2Q2.png)
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS Journal_Summary_Fact
+```
+
+```{sql connection=dbcon}
+CREATE TABLE Journal_Summary_Fact(
+  JounalSummaryId TEXT NOT NULL,
+  ISSN TEXT NOT NULL,
+  ArticleNumber Integer NOT NULL,
+  Quarter TEXT NOT NULL,
+  Year TEXT NOT NULL,
+  PRIMARY KEY (JounalSummaryId),
+  FOREIGN KEY (ISSN) REFERENCES Jounal_Dimension(ISSN)
+)
+```
+
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS Author_Summary_Fact
+```
+
+```{sql connection=dbcon}
+CREATE TABLE Author_Summary_Fact(
+  AuthorSummaryId TEXT NOT NULL,
+  AuthorId TEXT NOT NULL,
+  ArticleNumber Integer NOT NULL,
+  Quarter TEXT NOT NULL,
+  Year TEXT NOT NULL,
+  PRIMARY KEY (AuthorSummaryId),
+  FOREIGN KEY (AuthorId) REFERENCES Author_Dimension(AuthorId)
+)
+```
+
+## Populate the Journal_Summary_Fact table
+```{r}
+
+
+
+```
+
+## Populate the Author_Summary_Fact table
+```{r}
+
+```
+
+## Overwrite tables to database
+```{r}
+dbWriteTable(conn = dbcon, 
+             name = "Journal_Summary_Fact", 
+             value = data.frame(Journal_Summary_Fact),
+             overwrite = T)
+
+dbWriteTable(conn = dbcon, 
+             name = "Author_Summary_Fact", 
+             value = data.frame(Author_Summary_Fact),
+             overwrite = T)
+```
 
 
 
