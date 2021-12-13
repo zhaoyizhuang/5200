@@ -602,7 +602,7 @@ for (i in 1:size) {
   }
 }
 
-temp <- cbind(ISSN, Quarter, Year)
+temp <- cbind(JID, ISSN, Volume, Issue, Quarter, Year)
 temp <- data.frame(temp)
 
 ArticlesThisYear <- vector()
@@ -623,7 +623,7 @@ for (i in 1:nrow(temp)) {
   ArticlesThisQuarter <- append(ArticlesThisQuarter, qnum)
 }
 JournalSummaryId <- 1:nrow(temp)
-temp <- cbind(temp, ArticlesThisYear, ArticlesThisQuarter)
+temp <- cbind(JournalSummaryId, Title, temp, ArticlesThisYear, ArticlesThisQuarter)
 Journal_Summary_Fact <- temp[!duplicated(temp), ]
 Journal_Summary_Fact
 ```
@@ -704,9 +704,10 @@ for (i in 1:nrow(temp)) {
   ArticlesThisQuarter <- append(ArticlesThisQuarter, qnum)
 }
 
-AuthorSummaryId <- 1:nrow(temp)
 temp <- cbind(temp, ArticlesThisYear, ArticlesThisQuarter)
 Author_Summary_Fact <- temp[!duplicated(temp), ]
+AuthorSummaryId <- 1:nrow(Author_Summary_Fact)
+Author_Summary_Fact <- cbind(Author_Summary_Fact, AuthorSummaryId)
 Author_Summary_Fact
 ```
 
@@ -750,6 +751,8 @@ SELECT * FROM Journal_Summary_Fact
 
 # Part3
 ## Part3 Question1
+```{r}
+```
 
 
 ```{r}
