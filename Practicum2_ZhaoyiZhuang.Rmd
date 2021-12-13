@@ -34,8 +34,8 @@ CREATE TABLE Journal(
   JID Integer NOT NULL,
   ISSN TEXT NOT NULL,
   PubDate DATE NOT NULL,
-  Volume Integer NOT NULL,
-  Issue Integer NOT NULL,
+  Volume TEXT NOT NULL,
+  Issue TEXT NOT NULL,
   ISSNType TEXT NOT NULL,
   Title TEXT NOT NULL,
   PRIMARY KEY (JID)
@@ -67,7 +67,6 @@ CREATE TABLE History(
   received DATE,
   accepted DATE,
   entrez DATE NOT NULL,
-  medline DATE NOT NULL,
   PRIMARY KEY (HistoryId)
 )
 ```
@@ -81,8 +80,8 @@ CREATE TABLE Article(
   PMID Integer NOT NULL,
   ArticleTitle TEXT NOT NULL,
   DateCreated DATE NOT NULL,
-  JID TEXT NOT NULL,
-  HistoryId TEXT NOT NULL,
+  JID Integer NOT NULL,
+  HistoryId Integer NOT NULL,
   PRIMARY KEY (PMID),
   FOREIGN KEY (JID) REFERENCES Journal(JID),
   FOREIGN KEY (HistoryId) REFERENCES History(HistoryId)
@@ -126,7 +125,7 @@ readFromXml <- function(xpathEx) {
 
 ```
 
-## Create and Populate Journal table and add JID to Article. Assumption: The PubDate is the date for pubmed: date the citation was added to PubMed.
+## Create and Populate Journal table and add JID to Article. Note: The PubDate is depends on the subtag of the <PubDate> tag in the xml file. The PubDate in the database will be the 'pubmed' date when the subtag is <Year>, and 'medline' date when the subtag is <MedlineDate>
 ```{r}
 ISSN <- readFromXml("//Article/Journal/ISSN")
 Title <- readFromXml("//Article/Journal/Title")
@@ -139,9 +138,21 @@ ISSNType <- as.character(ISSNType)
 
 for (i in 1:size) {
   curr <- root[[i]][[2]][[1]]
+  isMed <- TRUE
+  for (e in 1:xmlSize(root[[i]][[1]])) {
+    if (xmlName(root[[i]][[1]][[e]]) == "Article") {
+        currr <- root[[i]][[1]][[e]][[1]][[2]][[3]][[1]]
+        if (xmlName(currr) == "Year") {
+          isMed <- FALSE
+        }
+      }
+  }
   for (e in 1:xmlSize(curr)) {
     a <- xmlAttrs(curr[[e]])[[1]]
-    if (a == "pubmed") {
+    if (a == "medline" & isMed) {
+      PubDate <- append(PubDate, (paste(xmlValue(curr[[e]][[2]]), xmlValue(curr[[e]][[3]]), xmlValue(curr[[e]][[1]]), sep = "/")))
+    }
+    if (a == "pubmed" & !(isMed)) {
       PubDate <- append(PubDate, (paste(xmlValue(curr[[e]][[2]]), xmlValue(curr[[e]][[3]]), xmlValue(curr[[e]][[1]]), sep = "/")))
     }
   }
@@ -162,7 +173,7 @@ FirstName <- vector()
 Initials <- vector()
 for (i in 1:size) {
   for (e in 1:xmlSize(root[[i]][[1]])) {
-    if (xmlName(root[[i]][[1]][[e]]) == "Article")
+    if (xmlName(root[[i]][[1]][[e]]) == "Article") {
       for (s in 1:xmlSize(root[[i]][[1]][[e]])) {
         if (xmlName(root[[i]][[1]][[e]][[s]]) == "AuthorList") {
           curr <- root[[i]][[1]][[e]][[s]]
@@ -178,6 +189,7 @@ for (i in 1:size) {
           }
         }
       }
+    }
   }
 }
 Author <- cbind(LastName, FirstName, Initials, Affiliation)
@@ -193,11 +205,11 @@ Author
 received <- vector()
 accepted <- vector()
 entrez <- vector()
-medline <- vector()
+#medline <- vector()
 
-Year <- vector()
-Month <- vector()
-Day <- vector()
+#Year <- vector()
+#Month <- vector()
+#Day <- vector()
 
 for (i in 1:size) {
   curr <- root[[i]][[2]][[1]]
@@ -216,14 +228,14 @@ for (i in 1:size) {
       accepted <- append(accepted, (paste(xmlValue(curr[[e]][[2]]), xmlValue(curr[[e]][[3]]), xmlValue(curr[[e]][[1]]), sep = "/")))
       hasA <- TRUE
     }
-    if (a == "pubmed") {
-      Year <- append(Year, xmlValue(curr[[e]][[1]]))
-      Month <- append(Month, xmlValue(curr[[e]][[2]]))
-      Day <- append(Day, xmlValue(curr[[e]][[3]]))
-    }
-    if (a == "medline") {
-      medline <- append(medline, (paste(xmlValue(curr[[e]][[2]]), xmlValue(curr[[e]][[3]]), xmlValue(curr[[e]][[1]]), sep = "/")))
-    }
+    #if (a == "pubmed") {
+    #  Year <- append(Year, xmlValue(curr[[e]][[1]]))
+    #  Month <- append(Month, xmlValue(curr[[e]][[2]]))
+    #  Day <- append(Day, xmlValue(curr[[e]][[3]]))
+    #}
+    #if (a == "medline") {
+    #  medline <- append(medline, (paste(xmlValue(curr[[e]][[2]]), xmlValue(curr[[e]][[3]]), xmlValue(curr[[e]][[1]]), sep = "/")))
+    #}
   }
   if (!(hasR)) {
     received <- append(received, NA)
@@ -233,12 +245,12 @@ for (i in 1:size) {
   }
 }
 
-History <- cbind(received, accepted, entrez, medline)
+History <- cbind(received, accepted, entrez)
 History <- History[!duplicated(History), ]
 
 HistoryId = 1:nrow(History)
 
-History <- cbind(History, HistoryId)
+History <- cbind(HistoryId, History)
 History <- data.frame(History)
 #History$received <- as.Date(History$received, format = "%m/%d/%Y")
 #History$accepted <- as.Date(History$accepted, format = "%m/%d/%Y")
@@ -584,6 +596,7 @@ for (i in 1:size) {
       if (as.character(xmlAttrs(root[[i]][[2]][[1]][[e]])) == "pubmed") {
         curr <- root[[i]][[2]][[1]][[e]]
         m <- as.numeric(xmlValue(curr[[2]]))
+        Year <- append(Year, xmlValue(curr[[1]]))
         if (m < 4) {
           Quarter  <- append(Quarter, 1);
         }
@@ -596,7 +609,6 @@ for (i in 1:size) {
         if (m > 9) {
           Quarter  <- append(Quarter, 4);
         }
-        Year <- append(Year, xmlValue(curr[[1]]))
       }
     }
   }
@@ -750,8 +762,15 @@ SELECT * FROM Journal_Summary_Fact
 ```
 
 # Part3
-## Part3 Question1
+## Part3
+## Number of publications for all journals each quarter
 ```{r}
+library(dplyr, warn.conflicts = FALSE)
+library(ggplot2)
+Qinfo <- paste(Journal_Summary_Fact$Quarter, Journal_Summary_Fact$Year, sep = "stQuarter")
+perYear <- aggregate(Journal_Summary_Fact$ArticlesThisQuarter, list(Qinfo), sum)
+colnames(perYear) <- c("Year", "ArticleNumber")
+perYear
 ```
 
 
