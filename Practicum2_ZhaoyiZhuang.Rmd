@@ -205,11 +205,6 @@ Author
 received <- vector()
 accepted <- vector()
 entrez <- vector()
-#medline <- vector()
-
-#Year <- vector()
-#Month <- vector()
-#Day <- vector()
 
 for (i in 1:size) {
   curr <- root[[i]][[2]][[1]]
@@ -228,14 +223,6 @@ for (i in 1:size) {
       accepted <- append(accepted, (paste(xmlValue(curr[[e]][[2]]), xmlValue(curr[[e]][[3]]), xmlValue(curr[[e]][[1]]), sep = "/")))
       hasA <- TRUE
     }
-    #if (a == "pubmed") {
-    #  Year <- append(Year, xmlValue(curr[[e]][[1]]))
-    #  Month <- append(Month, xmlValue(curr[[e]][[2]]))
-    #  Day <- append(Day, xmlValue(curr[[e]][[3]]))
-    #}
-    #if (a == "medline") {
-    #  medline <- append(medline, (paste(xmlValue(curr[[e]][[2]]), xmlValue(curr[[e]][[3]]), xmlValue(curr[[e]][[1]]), sep = "/")))
-    #}
   }
   if (!(hasR)) {
     received <- append(received, NA)
@@ -252,10 +239,6 @@ HistoryId = 1:nrow(History)
 
 History <- cbind(HistoryId, History)
 History <- data.frame(History)
-#History$received <- as.Date(History$received, format = "%m/%d/%Y")
-#History$accepted <- as.Date(History$accepted, format = "%m/%d/%Y")
-#History$entrez <- as.Date(History$entrez, format = "%m/%d/%Y")
-#History$medline <- as.Date(History$medline, format = "%m/%d/%Y")
 History
 ```
 
@@ -273,8 +256,6 @@ for (i in 1:size) {
 
 Article <- cbind(PMID, JID, HistoryId, DateCreated, ArticleTitle)
 Article <- data.frame(Article)
-#Article$DateCreated <- as.Date(Article$DateCreated, format = "%m/%d/%Y")
-#Article$PubDate <- as.Date(Article$PubDate, format = "%m/%d/%Y")
 Article
 ```
 
@@ -289,7 +270,7 @@ gg <- vector()
 for (i in 1:size) {
   pid <- xmlValue(root[[i]][[1]][[1]])
   for (e in 1:xmlSize(root[[i]][[1]])) {
-    if (xmlName(root[[i]][[1]][[e]]) == "Article")
+    if (xmlName(root[[i]][[1]][[e]]) == "Article") {
       for (s in 1:xmlSize(root[[i]][[1]][[e]])) {
         if (xmlName(root[[i]][[1]][[e]][[s]]) == "AuthorList") {
           curr <- root[[i]][[1]][[e]][[s]]
@@ -317,6 +298,7 @@ for (i in 1:size) {
         }
       }
     }
+  }
   Author_count <- Author_count + 1
 }
 
@@ -388,8 +370,8 @@ CREATE TABLE Journal_Dimension(
   JID Integer NOT NULL,
   ISSN TEXT NOT NULL,
   PubDate DATE NOT NULL,
-  Volume Integer NOT NULL,
-  Issue Integer NOT NULL,
+  Volume TEXT NOT NULL,
+  Issue TEXT NOT NULL,
   ISSNType TEXT NOT NULL,
   Title TEXT NOT NULL,
   PRIMARY KEY (JID)
@@ -421,71 +403,67 @@ CREATE TABLE History_Dimension(
   received DATE,
   accepted DATE,
   entrez DATE NOT NULL,
-  medline DATE NOT NULL,
   PRIMARY KEY (HistoryId)
 )
 ```
 
 ```{sql connection=dbcon}
-DROP TABLE IF EXISTS Article_Fact
+DROP TABLE IF EXISTS Article_Dimension
 ```
 
 ```{sql connection=dbcon}
-CREATE TABLE Article_Fact(
+CREATE TABLE Article_Dimension(
   PMID Integer NOT NULL,
   ArticleTitle TEXT NOT NULL,
   DateCreated DATE NOT NULL,
-  AuthorListId Integer NOT NULL,
-  JID TEXT NOT NULL,
-  HistoryId TEXT NOT NULL,
-  PRIMARY KEY (PMID),
-  FOREIGN KEY (AuthorListId) REFERENCES AuthorList_Dimension(AuthorListId),
+  PRIMARY KEY (PMID)
+)
+```
+
+```{sql connection=dbcon}
+DROP TABLE IF EXISTS FactTable
+```
+
+```{sql connection=dbcon}
+CREATE TABLE FactTable(
+  FactId Integer NOT NULL,
+  PMID Integer NOT NULL,
+  AuthorId Integer NOT NULL,
+  JID Integer NOT NULL,
+  HistoryId Integer NOT NULL,
+  PRIMARY KEY (FactId),
+  FOREIGN KEY (PMID) REFERENCES Article_Dimension(PMID),
+  FOREIGN KEY (AuthorId) REFERENCES Author_Dimension(AuthorId),
   FOREIGN KEY (JID) REFERENCES Journal_Dimension(JID),
   FOREIGN KEY (HistoryId) REFERENCES History_Dimension(HistoryId)
 )
 ```
 
-```{sql connection=dbcon}
-DROP TABLE IF EXISTS AuthorList_Dimension
-```
-
-```{sql connection=dbcon}
-CREATE TABLE AuthorList_Dimension(
-  AuthorListId TEXT NOT NULL,
-  PRIMARY KEY (AuthorListId)
-)
-```
-
-```{sql connection=dbcon}
-DROP TABLE IF EXISTS AuthorList_Bridge
-```
-
-```{sql connection=dbcon}
-CREATE TABLE AuthorList_Bridge(
-  AuthorListId TEXT NOT NULL,
-  AuthorId TEXT NOT NULL,
-  PRIMARY KEY (AuthorListId, AuthorId),
-  FOREIGN KEY (AuthorId) REFERENCES Author_Dimension(AuthorId), 
-  FOREIGN KEY (AuthorListId) REFERENCES AuthorList_Dimension(AuthorListId)
-)
-```
-
-## Populate the AuthorList_Dimension
+## Populate Article_Dimension table
 ```{r}
-AuthorList_Dimension = 1:size
+Article_Dimension <- cbind(PMID, DateCreated, ArticleTitle)
+Article_Dimension <- data.frame(Article_Dimension)
+Article_Dimension
 ```
 
-## Add AuthorListId to the Article_Fact
+## Populate FactTable
 ```{r}
-Article_Fact <- cbind(Article, AuthorList_Dimension)
-Article_Fact
-```
-
-## Populate the AuthorList_Bridge
-```{r}
-AuthorList_Bridge <- cbind(AuthorList_Id, AuthorList_AuthorId)
-AuthorList_Bridge <- data.frame(AuthorList_Bridge)
-AuthorList_Bridge
+Factjid <- vector()
+FactHis <- vector()
+for (i in 1:nrow(Write)) {
+  for (s in 1:nrow(Article)) {
+    if (Write$PMID[i] == Article$PMID[s]) {
+      Factjid <- append(Factjid, as.character(Article$JID[s]))
+      FactHis <- append(FactHis, as.character(Article$HistoryId[s]))
+    }
+  }
+}
+FactId <- 1:length(Factjid)
+FactTable <- cbind(FactId, ff, gg, Factjid, FactHis)
+#FactTable <- FactTable[!duplicated(FactTable), ]
+FactTable <- data.frame(FactTable)
+colnames(FactTable) <- c("FactId", "AuthorId", "PMID", "JID", "HistoryId")
+FactTable
 ```
 
 ## Overwrite tables to database
@@ -506,19 +484,16 @@ dbWriteTable(conn = dbcon,
              overwrite = T)
 
 dbWriteTable(conn = dbcon, 
-             name = "Article_Fact", 
-             value = Article_Fact,
+             name = "Article_Dimension", 
+             value = Article_Dimension,
              overwrite = T)
 
 dbWriteTable(conn = dbcon, 
-             name = "AuthorList_Bridge", 
-             value = AuthorList_Bridge,
+             name = "FactTable", 
+             value = FactTable,
              overwrite = T)
 
-dbWriteTable(conn = dbcon, 
-             name = "AuthorList_Dimension", 
-             value = data.frame(AuthorList_Dimension),
-             overwrite = T)
+
 ```
 
 ## Show tables
@@ -531,20 +506,17 @@ SELECT * FROM Journal_Dimension
 ```
 
 ```{sql connection=dbcon}
-SELECT * FROM AuthorList_Dimension
-```
-
-```{sql connection=dbcon}
-SELECT * FROM AuthorList_Bridge
-```
-
-```{sql connection=dbcon}
 SELECT * FROM Author_Dimension
 ```
 
 ```{sql connection=dbcon}
-SELECT * FROM Article_Fact
+SELECT * FROM Article_Dimension
 ```
+
+```{sql connection=dbcon}
+SELECT * FROM FactTable
+```
+
 
 ## Part2 Question2
 ![](/Users/zhaoyizhuang/5200/Practicum2/P2Q2.png)
@@ -554,13 +526,18 @@ DROP TABLE IF EXISTS Journal_Summary_Fact
 
 ```{sql connection=dbcon}
 CREATE TABLE Journal_Summary_Fact(
-  JounalSummaryId TEXT NOT NULL,
+  JounalSummaryId Integer NOT NULL,
+  JID Integer NOT NULL,
   ISSN TEXT NOT NULL,
-  ArticleNumber Integer NOT NULL,
+  Volume TEXT NOT NULL,
+  Issue TEXT NOT NULL,
+  Title TEXT NOT NULL,
+  ArticleThisYear Integer NOT NULL,
+  ArticleThisQuarter Integer NOT NULL,
   Quarter TEXT NOT NULL,
   Year TEXT NOT NULL,
   PRIMARY KEY (JounalSummaryId),
-  FOREIGN KEY (ISSN) REFERENCES Jounal_Dimension(ISSN)
+  FOREIGN KEY (JID) REFERENCES Jounal_Dimension(JID)
 )
 ```
 
@@ -580,42 +557,39 @@ CREATE TABLE Author_Summary_Fact(
 )
 ```
 
-## Populate the Journal_Summary_Fact table
+## Preparation for the summary table
 ```{r}
-ISSN <- vector()
-Quarter  <- vector()
-Year <- vector()
-for (i in 1:size) {
-  for (e in 1:xmlSize(root[[i]][[1]])) {
-    if (xmlName(root[[i]][[1]][[e]]) == "Article") {
-      ISSN <- append(ISSN, xmlValue(root[[i]][[1]][[e]][[1]][[1]]))
-    }
-  }
-  for (e in 1:xmlSize(root[[i]][[2]][[1]])) {
-    if (xmlName(root[[i]][[2]][[1]][[e]]) == "PubMedPubDate") {
-      if (as.character(xmlAttrs(root[[i]][[2]][[1]][[e]])) == "pubmed") {
-        curr <- root[[i]][[2]][[1]][[e]]
-        m <- as.numeric(xmlValue(curr[[2]]))
-        Year <- append(Year, xmlValue(curr[[1]]))
-        if (m < 4) {
-          Quarter  <- append(Quarter, 1);
-        }
-        if (m > 3 & m < 7) {
-          Quarter  <- append(Quarter, 2);
-        }
-        if (m > 6 & m < 10) {
-          Quarter  <- append(Quarter, 3);
-        }
-        if (m > 9) {
-          Quarter  <- append(Quarter, 4);
-        }
-      }
-    }
-  }
+library(lubridate, warn.conflicts = FALSE)
+pubmonth <- vector()
+pubyear <- vector()
+
+for (i in 1:nrow(Journal)) {
+  pubmonth <- append(pubmonth, month(as.POSIXct(Journal$PubDate[i], format = "%m/%d/%Y")))
+  pubyear <- append(pubyear, year(as.POSIXct(Journal$PubDate[i], format = "%m/%d/%Y")))
 }
 
-temp <- cbind(JID, ISSN, Volume, Issue, Quarter, Year)
-temp <- data.frame(temp)
+Quarter  <- vector()
+
+for (i in 1:size) {
+  m <- pubmonth[i]
+  if (m < 4) {
+    Quarter  <- append(Quarter, 1);
+  }
+  if (m > 3 & m < 7) {
+    Quarter  <- append(Quarter, 2);
+  }
+  if (m > 6 & m < 10) {
+    Quarter  <- append(Quarter, 3);
+  }
+  if (m > 9) {
+    Quarter  <- append(Quarter, 4);
+  }
+}
+```
+
+## Populate the Journal_Summary_Fact table. Note: Each row represents how many articles one journal public each Quarter and each Year.
+```{r}
+temp <- cbind(ISSN, Quarter, pubyear)
 
 ArticlesThisYear <- vector()
 ArticlesThisQuarter <- vector()
@@ -624,119 +598,127 @@ for (i in 1:nrow(temp)) {
   anum <- 0
   qnum <- 0
   for (j in 1:nrow(temp)) {
-    if (temp$ISSN[i] == temp$ISSN[j] & temp$Year[i] == temp$Year[j]) {
+    if (temp[, 1][i] == temp[, 1][j] & temp[, 3][i] == temp[, 3][j]) {
       anum <- anum + 1
     }
-    if (temp$ISSN[i] == temp$ISSN[j] & temp$Quarter[i] == temp$Quarter[j] & temp$Year[i] == temp$Year[j]) {
+    if (temp[, 1][i] == temp[, 1][j] & temp[, 2][i] == temp[, 2][j] & temp[, 3][i] == temp[, 3][j]) {
       qnum <- qnum + 1
     }
   }
   ArticlesThisYear <- append(ArticlesThisYear, anum)
   ArticlesThisQuarter <- append(ArticlesThisQuarter, qnum)
 }
+
+temp <- data.frame(temp)
+
 JournalSummaryId <- 1:nrow(temp)
-temp <- cbind(JournalSummaryId, Title, temp, ArticlesThisYear, ArticlesThisQuarter)
+temp <- cbind(JournalSummaryId, JID, Volume, Issue, temp, ArticlesThisYear, ArticlesThisQuarter, Title)
+
+
 Journal_Summary_Fact <- temp[!duplicated(temp), ]
+Journal_Summary_Fact <- data.frame(Journal_Summary_Fact)
+colnames(Journal_Summary_Fact) <- c("JSummaryId", "JID", "Volume", "Issue", "ISSN", "Quarter", "Year", "ArticlesInYear", "ArticlesInQuarter", "Title")
 Journal_Summary_Fact
 ```
 
 ## Populate the Author_Summary_Fact table. Note: this chunk will take a while to run because it does a lot of calculation.
 ```{r}
-Affiliation <- vector()
-LastName <- vector()
-FirstName <- vector()
-Initials <- vector()
-Quarter  <- vector()
-Year <- vector()
-for (i in 1:size) {
-  for (e in 1:xmlSize(root[[i]][[1]])) {
-    if (xmlName(root[[i]][[1]][[e]]) == "Article")
-      for (s in 1:xmlSize(root[[i]][[1]][[e]])) {
-        if (xmlName(root[[i]][[1]][[e]][[s]]) == "AuthorList") {
-          curr <- root[[i]][[1]][[e]][[s]]
-          for (f in 1:xmlSize(curr)) {
-            
-              for (ee in 1:xmlSize(root[[i]][[2]][[1]])) {
-                if (xmlName(root[[i]][[2]][[1]][[ee]]) == "PubMedPubDate") {
-                  if (as.character(xmlAttrs(root[[i]][[2]][[1]][[ee]])) == "pubmed") {
-                    currrr <- root[[i]][[2]][[1]][[ee]]
-                    m <- as.numeric(xmlValue(currrr[[2]]))
-                    if (m < 4) {
-                      Quarter  <- append(Quarter, 1);
-                    }
-                    if (m > 3 & m < 7) {
-                      Quarter  <- append(Quarter, 2);
-                    }
-                    if (m > 6 & m < 10) {
-                      Quarter  <- append(Quarter, 3);
-                    }
-                    if (m > 9) {
-                      Quarter  <- append(Quarter, 4);
-                    }
-                    Year <- append(Year, xmlValue(currrr[[1]]))
-                  }
-                }
-              }
-            
-            LastName <- append(LastName, xmlValue(curr[[f]][[1]]))
-            FirstName <- append(FirstName, xmlValue(curr[[f]][[2]]))
-            Initials <- append(Initials, xmlValue(curr[[f]][[3]]))
-            cc <- xmlValue(curr[[f]][[4]])
-            if (is.na(cc)) {
-              cc <- "None"
-            }
-            Affiliation <- append(Affiliation, cc)
-          }
-        }
-      }
-  }
-}
-temp <- cbind(LastName, FirstName, Initials, Affiliation, Quarter, Year)
-temp <- data.frame(temp)
-
-ArticlesThisYear <- vector()
-ArticlesThisQuarter <- vector()
-
-for (i in 1:nrow(temp)) {
-  anum <- 0
-  qnum <- 0
-  for (j in 1:nrow(temp)) {
-    if (temp$LastName[i] == temp$LastName[j] & temp$FirstName[i] == temp$FirstName[j]
-        & temp$Initials[i] == temp$Initials[j] & temp$Affiliation[i] == temp$Affiliation[j] 
-        & temp$Year[i] == temp$Year[j]) {
-      anum <- anum + 1
-    }
-    if (temp$LastName[i] == temp$LastName[j] & temp$FirstName[i] == temp$FirstName[j]
-        & temp$Initials[i] == temp$Initials[j] & temp$Affiliation[i] == temp$Affiliation[j] 
-        & temp$Year[i] == temp$Year[j] & temp$Quarter[i] == temp$Quarter[j]) {
-      qnum <- qnum + 1
-    }
-  }
-  ArticlesThisYear <- append(ArticlesThisYear, anum)
-  ArticlesThisQuarter <- append(ArticlesThisQuarter, qnum)
-}
-
-temp <- cbind(temp, ArticlesThisYear, ArticlesThisQuarter)
-Author_Summary_Fact <- temp[!duplicated(temp), ]
-AuthorSummaryId <- 1:nrow(Author_Summary_Fact)
-Author_Summary_Fact <- cbind(Author_Summary_Fact, AuthorSummaryId)
-Author_Summary_Fact
+# Affiliation <- vector()
+# LastName <- vector()
+# FirstName <- vector()
+# Initials <- vector()
+# Quarter  <- vector()
+# Year <- vector()
+# for (i in 1:size) {
+#   for (e in 1:xmlSize(root[[i]][[1]])) {
+#     if (xmlName(root[[i]][[1]][[e]]) == "Article")
+#       for (s in 1:xmlSize(root[[i]][[1]][[e]])) {
+#         if (xmlName(root[[i]][[1]][[e]][[s]]) == "AuthorList") {
+#           curr <- root[[i]][[1]][[e]][[s]]
+#           for (f in 1:xmlSize(curr)) {
+#             
+#               for (ee in 1:xmlSize(root[[i]][[2]][[1]])) {
+#                 if (xmlName(root[[i]][[2]][[1]][[ee]]) == "PubMedPubDate") {
+#                   if (as.character(xmlAttrs(root[[i]][[2]][[1]][[ee]])) == "pubmed") {
+#                     currrr <- root[[i]][[2]][[1]][[ee]]
+#                     m <- as.numeric(xmlValue(currrr[[2]]))
+#                     if (m < 4) {
+#                       Quarter  <- append(Quarter, 1);
+#                     }
+#                     if (m > 3 & m < 7) {
+#                       Quarter  <- append(Quarter, 2);
+#                     }
+#                     if (m > 6 & m < 10) {
+#                       Quarter  <- append(Quarter, 3);
+#                     }
+#                     if (m > 9) {
+#                       Quarter  <- append(Quarter, 4);
+#                     }
+#                     Year <- append(Year, xmlValue(currrr[[1]]))
+#                   }
+#                 }
+#               }
+#             
+#             LastName <- append(LastName, xmlValue(curr[[f]][[1]]))
+#             FirstName <- append(FirstName, xmlValue(curr[[f]][[2]]))
+#             Initials <- append(Initials, xmlValue(curr[[f]][[3]]))
+#             cc <- xmlValue(curr[[f]][[4]])
+#             if (is.na(cc)) {
+#               cc <- "None"
+#             }
+#             Affiliation <- append(Affiliation, cc)
+#           }
+#         }
+#       }
+#   }
+# }
+# temp <- cbind(LastName, FirstName, Initials, Affiliation, Quarter, Year)
+# temp <- data.frame(temp)
+# 
+# ArticlesThisYear <- vector()
+# ArticlesThisQuarter <- vector()
+# 
+# for (i in 1:nrow(temp)) {
+#   anum <- 0
+#   qnum <- 0
+#   for (j in 1:nrow(temp)) {
+#     if (temp$LastName[i] == temp$LastName[j] & temp$FirstName[i] == temp$FirstName[j]
+#         & temp$Initials[i] == temp$Initials[j] & temp$Affiliation[i] == temp$Affiliation[j] 
+#         & temp$Year[i] == temp$Year[j]) {
+#       anum <- anum + 1
+#     }
+#     if (temp$LastName[i] == temp$LastName[j] & temp$FirstName[i] == temp$FirstName[j]
+#         & temp$Initials[i] == temp$Initials[j] & temp$Affiliation[i] == temp$Affiliation[j] 
+#         & temp$Year[i] == temp$Year[j] & temp$Quarter[i] == temp$Quarter[j]) {
+#       qnum <- qnum + 1
+#     }
+#   }
+#   ArticlesThisYear <- append(ArticlesThisYear, anum)
+#   ArticlesThisQuarter <- append(ArticlesThisQuarter, qnum)
+# }
+# 
+# temp <- cbind(temp, ArticlesThisYear, ArticlesThisQuarter)
+# Author_Summary_Fact <- temp[!duplicated(temp), ]
+# AuthorSummaryId <- 1:nrow(Author_Summary_Fact)
+# Author_Summary_Fact <- cbind(Author_Summary_Fact, AuthorSummaryId)
+# Author_Summary_Fact
 ```
 
 ## Add AuthorId to the corresponding row.
 ```{r}
-AuthorId <- vector()
-for (i in 1:nrow(Author_Summary_Fact)) {
-  for (j in 1:nrow(Author)) {
-    if (Author$LastName[j] == Author_Summary_Fact$LastName[i] & Author$FirstName[j] == Author_Summary_Fact$FirstName[i] & 
-        Author$Initials[j] == Author_Summary_Fact$Initials[i] & Author$Affiliation[j] == Author_Summary_Fact$Affiliation[i]) {
-      AuthorId <- append(AuthorId, as.character(Author$AuthorId[j]))
-      break;
-        }
-  }
-}
-Author_Summary_Fact <- cbind(AuthorId, Author_Summary_Fact)
-Author_Summary_Fact
+# AuthorId <- vector()
+# for (i in 1:nrow(Author_Summary_Fact)) {
+#   for (j in 1:nrow(Author)) {
+#     if (Author$LastName[j] == Author_Summary_Fact$LastName[i] & Author$FirstName[j] == Author_Summary_Fact$FirstName[i] & 
+#         Author$Initials[j] == Author_Summary_Fact$Initials[i] & Author$Affiliation[j] == Author_Summary_Fact$Affiliation[i]) {
+#       AuthorId <- append(AuthorId, as.character(Author$AuthorId[j]))
+#       break;
+#         }
+#   }
+# }
+# Author_Summary_Fact <- cbind(AuthorId, Author_Summary_Fact)
+# Author_Summary_Fact
+
 ```
 
 ## Overwrite tables to database
@@ -746,10 +728,10 @@ dbWriteTable(conn = dbcon,
              value = Journal_Summary_Fact,
              overwrite = T)
 
-dbWriteTable(conn = dbcon, 
-             name = "Author_Summary_Fact", 
-             value = Author_Summary_Fact,
-             overwrite = T)
+# dbWriteTable(conn = dbcon, 
+#              name = "Author_Summary_Fact", 
+#              value = Author_Summary_Fact,
+#              overwrite = T)
 ```
 
 ## Show tables
@@ -761,16 +743,46 @@ SELECT * FROM Author_Summary_Fact
 SELECT * FROM Journal_Summary_Fact
 ```
 
+```{sql connection=dbcon}
+select Quarter, sum(ArticlesInQuarter) as ArticlesInQuarter from Journal_Summary_Fact
+group by Quarter
+```
+
 # Part3
 ## Part3
 ## Number of publications for all journals each quarter
 ```{r}
-library(dplyr, warn.conflicts = FALSE)
+## select Articles number in each quarter in different year from the database.
+Yquarter <- dbGetQuery(dbcon, "select Year, Quarter, sum(ArticlesInQuarter) as ArticlesInQuarter from Journal_Summary_Fact
+group by Year, Quarter")
+## select Articles number in each quarter regardless of which year from the database.
+NoYquarter <- dbGetQuery(dbcon, "select Quarter, sum(ArticlesInQuarter) as ArticlesInQuarter from Journal_Summary_Fact
+group by Quarter")
+NoYquarter
+Yquarter
+```
+
+## The Graph shows the number of publications for all journals each quarter in different years.
+```{r}
 library(ggplot2)
-Qinfo <- paste(Journal_Summary_Fact$Quarter, Journal_Summary_Fact$Year, sep = "stQuarter")
-perYear <- aggregate(Journal_Summary_Fact$ArticlesThisQuarter, list(Qinfo), sum)
-colnames(perYear) <- c("Year", "ArticleNumber")
-perYear
+Qinfo <- paste(Yquarter$Year, "Q", Yquarter$Quarter, sep = "")
+hg <- cbind(Qinfo, Yquarter$ArticlesInQuarter)
+hg <- data.frame(hg)
+
+p <- ggplot(hg, aes(x = Qinfo, y = V2, group = 1)) +
+  geom_line() + geom_point() +
+  xlab("Quarters") + ylab("Number of Publications") +
+  ggtitle("Number of Publications for All Journals Each Quarter From 2011 to 2014")
+p
+```
+
+## The Graph shows the aggregated number of publications for all journals each quarter.
+```{r}
+p <- ggplot(NoYquarter, aes(x = Quarter, y = ArticlesInQuarter)) +
+  geom_bar(stat = "identity") +
+  xlab("Quarters") + ylab("Number of Publications") +
+  ggtitle("Aggregated Number of Publications for Each Quarter From 2011 to 2014")
+p
 ```
 
 
